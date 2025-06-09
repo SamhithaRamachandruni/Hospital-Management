@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  # SQL Server Database
+  database:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: healthcare_db
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=YourStrong@Passw0rd
+      - MSSQL_PID=Express
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - healthcare_network
+    restart: unless-stopped
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: healthcare_api
+    environment:
+      - DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5000
+      - ConnectionStrings__DefaultConnection=Server=database,1433;Database=HealthcareDB;User Id=SA;Password=YourStrong@Passw0rd;TrustServerCertificate=true;
+      - JWT__SecretKey=YourSuperSecretJWTKeyThatIsVeryLongAndSecure123456789
+      - JWT__Issuer=HealthcareAPI
+      - JWT__Audience=HealthcareApp
+    ports:
+      - "5000:5000"
+    depends_on:
+      - database
+    networks:
+      - healthcare_network
+    restart: unless-stopped
+    volumes:
+      - ./backend:/app/src
+    command: >
+      sh -c "
+        echo 'Waiting for database to be ready...' &&
+        sleep 30 &&
+        dotnet ef database update --no-build &&
+        dotnet run --no-build
+      "
+
+  # Frontend Angular App
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: healthcare_frontend
+    environment:
+      - NODE_ENV=development
+    ports:
+      - "4200:4200"
+    depends_on:
+      - backend
+    networks:
+      - healthcare_network
+    restart: unless-stopped
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+networks:
+  healthcare_network:
+    driver: bridge
+
+volumes:
+  sqlserver_data:
+    driver: local
